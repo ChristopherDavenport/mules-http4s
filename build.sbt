@@ -1,4 +1,5 @@
-import sbtcrossproject.CrossPlugin.autoImport.{crossProject, CrossType}
+val Scala212 = "2.12.10"
+val Scala213 = "2.13.1"
 
 val catsV = "2.1.0"
 val catsEffectV = "2.1.4"
@@ -44,8 +45,8 @@ lazy val site = project.in(file("site"))
   .enablePlugins(NoPublishPlugin)
   .settings(commonSettings)
   .dependsOn(core)
-  .settings{
-    import microsites._
+  .settings {
+    import microsites.ExtraMdFileConfig
     Seq(
       micrositeName := "mules-http4s",
       micrositeDescription := "Http4s Caching Implementation",
@@ -67,8 +68,7 @@ lazy val site = project.in(file("site"))
         "gray-lighter" -> "#F4F3F4",
         "white-color" -> "#FFFFFF"
       ),
-      micrositeCompilingDocsTool := WithMdoc,
-      scalacOptions in Tut --= Seq(
+      scalacOptions --= Seq(
         "-Xfatal-warnings",
         "-Ywarn-unused-import",
         "-Ywarn-numeric-widen",
@@ -79,8 +79,8 @@ lazy val site = project.in(file("site"))
       micrositePushSiteWith := GitHub4s,
       micrositeGithubToken := sys.env.get("GITHUB_TOKEN"),
       micrositeExtraMdFiles := Map(
-          file("CODE_OF_CONDUCT.md")  -> ExtraMdFileConfig("code-of-conduct.md",   "page", Map("title" -> "code of conduct",   "section" -> "code of conduct",   "position" -> "100")),
-          file("LICENSE")             -> ExtraMdFileConfig("license.md",   "page", Map("title" -> "license",   "section" -> "license",   "position" -> "101"))
+        file("CODE_OF_CONDUCT.md") -> ExtraMdFileConfig("code-of-conduct.md", "page", Map("title" -> "code of conduct", "section" -> "code of conduct", "position" -> "100")),
+        file("LICENSE")            -> ExtraMdFileConfig("license.md", "page", Map("title" -> "license", "section" -> "license", "position" -> "101"))
       ),
       libraryDependencies ++= Seq(
         "io.chrisdavenport" %% "mules-caffeine" % mulesV,
@@ -91,8 +91,6 @@ lazy val site = project.in(file("site"))
 
 // General Settings
 lazy val commonSettings = Seq(
-  scalaVersion := "2.13.1",
-  crossScalaVersions := Seq(scalaVersion.value, "2.12.10"),
 
   addCompilerPlugin("org.typelevel" %% "kind-projector" % kindProjectorV cross CrossVersion.full),
   addCompilerPlugin("com.olegpy"    %% "better-monadic-for" % betterMonadicForV),
@@ -114,23 +112,55 @@ lazy val commonSettings = Seq(
     "io.chrisdavenport"           %% "cats-scalacheck"            % "0.3.0"       % Test,
     "com.codecommit"              %% "cats-effect-testing-specs2" % "0.3.0"       %  Test,
     "org.http4s"                  %% "http4s-dsl"                 % http4sV       % Test,
-  )
+  ),
+
+  Compile / doc / scalacOptions ++= Seq(
+    "-groups",
+    "-sourcepath", (LocalRootProject / baseDirectory).value.getAbsolutePath,
+    "-doc-source-url", "https://github.com/ChristopherDavenport/mules-http4s/blob/v" + version.value + "€{FILE_PATH}.scala"
+  ),
+
+  pomIncludeRepository := { _ => false }
 )
 
 // General Settings
-inThisBuild(List(
-  organization := "io.chrisdavenport",
-  developers := List(
-    Developer("ChristopherDavenport", "Christopher Davenport", "chris@christopherdavenport.tech", url("https://github.com/ChristopherDavenport"))
-  ),
+ThisBuild / crossScalaVersions := Seq(Scala212, Scala213)
+ThisBuild / scalaVersion := crossScalaVersions.value.last
 
-  homepage := Some(url("https://github.com/ChristopherDavenport/mules-http4s")),
-  licenses += ("MIT", url("http://opensource.org/licenses/MIT")),
+ThisBuild / organization := "io.chrisdavenport"
+ThisBuild / developers := List(
+  Developer(
+    "ChristopherDavenport", "Christopher Davenport", "chris@christopherdavenport.tech",
+    url("https://github.com/ChristopherDavenport"))
+)
 
-  pomIncludeRepository := { _ => false},
-  scalacOptions in (Compile, doc) ++= Seq(
-      "-groups",
-      "-sourcepath", (baseDirectory in LocalRootProject).value.getAbsolutePath,
-      "-doc-source-url", "https://github.com/ChristopherDavenport/mules-http4s/blob/v" + version.value + "€{FILE_PATH}.scala"
-  )
-))
+ThisBuild / homepage := Some(url("https://github.com/ChristopherDavenport/mules-http4s"))
+ThisBuild / licenses += ("MIT", url("http://opensource.org/licenses/MIT"))
+
+ThisBuild / githubWorkflowArtifactUpload := false
+
+ThisBuild / githubWorkflowTargetTags ++= Seq("v*")
+
+val Scala213Cond = s"matrix.scala == '$Scala213'"
+
+def rubySetupSteps(cond: Option[String]) = Seq(
+  WorkflowStep.Use(
+    UseRef.Public("ruby", "setup-ruby", "v1"),
+    name = Some("Setup Ruby"),
+    params = Map("ruby-version" -> "2.6.0"),
+    cond = cond),
+
+  WorkflowStep.Run(
+    List(
+      "gem install saas",
+      "gem install jekyll -v 3.2.1"),
+    name = Some("Install microsite dependencies"),
+    cond = cond))
+
+ThisBuild / githubWorkflowBuildPreamble ++=
+  rubySetupSteps(Some(Scala213Cond))
+
+ThisBuild / githubWorkflowBuild := Seq(
+  WorkflowStep.Sbt(List("test", "mimaReportBinaryIssues"), name = Some("Compile and test project code")),
+  WorkflowStep.Sbt(List("site/makeMicrosite"), cond = Some(Scala213Cond), name = Some("Make microsite"))
+)
